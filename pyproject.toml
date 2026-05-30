@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastberry"
+version = "0.1.0"
+description = "Performance helpers for strawberry-django: skip resolver overhead on sync Django."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Dávid Sárosi" },
+]
+keywords = ["strawberry", "graphql", "django", "performance", "strawberry-django"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "strawberry-graphql>=0.200",
+    "Django>=4.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "strawberry-graphql[debug-server]>=0.200",
+    "strawberry-graphql-django>=0.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/davidsarosi/fastberry"
+Repository = "https://github.com/davidsarosi/fastberry"
+Issues = "https://github.com/davidsarosi/fastberry/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fastberry"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
