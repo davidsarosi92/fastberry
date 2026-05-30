@@ -33,16 +33,36 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Read-only REST serialization (fastberry.rest) needs a fast JSON encoder.
+rest = [
+    "orjson>=3.9",
+]
+# The fast_strawberry_django wrapper needs strawberry-graphql-django.
+graphql = [
+    "strawberry-graphql-django>=0.20",
+]
+# Use fastberry.rest with the SQLAlchemy ORM instead of Django (e.g. FastAPI).
+# Still needs the `rest` extra for orjson.
+sqlalchemy = [
+    "orjson>=3.9",
+    "SQLAlchemy>=2.0",
+]
 dev = [
     "pytest>=8.0",
     "strawberry-graphql[debug-server]>=0.200",
     "strawberry-graphql-django>=0.20",
+    "djangorestframework>=3.14",
+    "orjson>=3.9",
+    "SQLAlchemy>=2.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/davidsarosi92/fastberry"
 Repository = "https://github.com/davidsarosi92/fastberry"
 Issues = "https://github.com/davidsarosi92/fastberry/issues"
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
 
 [tool.hatch.version]
 source = "vcs"
@@ -59,4 +79,7 @@ include = [
     "/tests",
     "/README.md",
     "/LICENSE",
+]
+exclude = [
+    "/src/fastberry/_version.py",
 ]

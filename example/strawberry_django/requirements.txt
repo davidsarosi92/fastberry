@@ -1,0 +1,5 @@
+# fastberry[graphql] is installed from the repo root (see Dockerfile / README).
+Django>=4.2
+strawberry-graphql>=0.200
+strawberry-graphql-django>=0.20
+psycopg[binary]>=3.1

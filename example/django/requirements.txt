@@ -1,0 +1,4 @@
+# fastberry[rest] is installed from the repo root (see Dockerfile / README).
+Django>=4.2
+djangorestframework>=3.14
+psycopg[binary]>=3.1

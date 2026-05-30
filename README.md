@@ -1,25 +1,39 @@
 # fastberry
 
-Performance helpers for [strawberry-django](https://strawberry.rocks/docs/django)
-GraphQL schemas running under **synchronous** Django.
+Performance helpers for **synchronous** Django, on both GraphQL and REST.
 
-`strawberry-django` wraps every field resolver in `django_resolver`, which calls
-`in_async_context()` on each resolution. Under sync Django that call raises and
-catches a `RuntimeError` internally (~0.15 ms per field). On large result sets
-this dominates response time — pure CPU overhead with zero extra database
-queries.
+Under sync Django, the per-instance / per-field overhead of GraphQL and REST
+frameworks dominates response time on large or deeply-nested payloads — pure
+CPU cost with no extra database work. `fastberry` lets you opt specific hot
+paths out of that machinery.
 
-`fastberry` lets you opt specific "hot" types out of that machinery.
+Two independent helpers:
+
+- **`fast_path`** (GraphQL) — skip `strawberry-django`'s `django_resolver`
+  overhead on hot types.
+- **`fastberry.rest`** — read-only nested REST serialization that assembles the
+  tree from `.values()` queries and encodes with `orjson`.
 
 ## Install
 
 ```bash
-pip install fastberry
+pip install fastberry                # GraphQL helpers
+pip install 'fastberry[rest]'        # also enables fastberry.rest (pulls in orjson)
+pip install 'fastberry[sqlalchemy]'  # fastberry.rest on SQLAlchemy (e.g. FastAPI)
 ```
 
-Requires Python 3.10+, Django 4.2+, and strawberry-graphql.
+Requires Python 3.10+, Django 4.2+.
 
-## Usage
+---
+
+## GraphQL: `fast_path`
+
+`strawberry-django` wraps every field resolver in `django_resolver`, which calls
+`in_async_context()` on each resolution. Under sync Django that call raises and
+catches a `RuntimeError` internally — a fixed per-field CPU cost (roughly a
+microsecond or two per field on current strawberry-django; more on older
+versions) with no extra database work. Because it is paid *per field*, on large
+or wide result sets it adds up and dominates response time.
 
 Mark hot types with `@fast_path` (outermost, after `@strawberry_django.type`)
 and register `FastPathExtension` on the schema:
@@ -44,47 +58,235 @@ class Query:
     stocks: list[StockType] = strawberry_django.field()
 
 
-schema = strawberry.Schema(
-    query=Query,
-    extensions=[FastPathExtension],
-)
+schema = strawberry.Schema(query=Query, extensions=[FastPathExtension])
 ```
 
 Only types decorated with `@fast_path` take the fast path; everything else
-resolves normally. To turn the optimization off, remove the extension (global)
-or the decorator (per type).
+resolves normally. To turn it off, remove the extension (global) or the
+decorator (per type).
 
-### How it works
+### One decorator instead of two
 
-- **Plain fields** resolve via a direct `getattr(root, attr)`. Related
-  managers (`*-to-many`) are materialized with `.all()`.
-- **Custom resolvers** are called directly, bypassing the `django_resolver`
-  wrapper.
+To avoid stacking `@fast_path` + `@strawberry_django.type` on every hot type,
+use the combined wrapper. It forwards all arguments to `strawberry_django` and
+applies `fast_path` on top:
 
-The field→resolver map is built once, at class-definition time, and keyed by the
-GraphQL type name (`info.parent_type.name`) — not the Python class — because at
-resolve time `root` is the Django model instance, not the Strawberry type.
+```python
+from fastberry import strawberry_django as fast_strawberry_django
 
-## Benchmarks
+@fast_strawberry_django.type(Stock, disable_optimization=True)
+class StockType:
+    id: int
+    title: str
+```
 
-Indicative numbers from a real schema (~3000 objects, ~27 fields each):
+`fast_strawberry_django.type` and `.interface` are exposed. You still register
+`FastPathExtension` on the schema once. Needs the `graphql` extra
+(`pip install 'fastberry[graphql]'`).
 
-| Scenario        | Without fast-path | With fast-path | Speedup |
-| --------------- | ----------------- | -------------- | ------- |
-| `stocks_by_house` | 4.4 s           | 1.8 s          | ~2.4×   |
+### Generate the GraphQL type from the model
 
-Your mileage will vary with field count and result-set size.
+If you don't want to hand-write the type at all, decorate the **model** with
+`fast_schema`. It builds a `strawberry_django` type from the model's fields,
+applies `fast_path`, and stores it on the model as `__fast_type__`:
+
+```python
+from fastberry.strawberry_django import fast_schema
+
+@fast_schema
+class Stock(models.Model): ...                       # all concrete fields
+
+@fast_schema(fields=["id", "title"], name="StockType")
+class Other(models.Model): ...                        # subset + custom name
+
+StockType = Stock.__fast_type__                       # wire into your schema
+```
+
+Extra keyword args (e.g. `disable_optimization=True`) are forwarded to
+`strawberry_django.type`. The decorator returns the model unchanged, so it
+composes with other model decorators. Needs the `graphql` extra.
+
+**How it works:** the field→resolver map is built once, at class-definition
+time, keyed by the GraphQL type name (`info.parent_type.name`). Plain fields
+resolve via a direct `getattr`; related managers are materialized with `.all()`;
+custom resolvers are called directly, bypassing the `django_resolver` wrapper.
+
+**Benchmark** (the [`strawberry_django` example](example/strawberry_django);
+3 200 stocks, sync Django + Postgres, query optimizer enabled on both sides so
+only the per-field resolver overhead differs). The win scales with the number
+of fields resolved per type — wide, hot types benefit most:
+
+| Fields / type | Without fast-path | With fast-path | Speedup |
+| ------------: | ----------------: | -------------: | ------- |
+| 1             | 46.7 ms           | 37.1 ms        | 1.26×   |
+| 8             | 123.9 ms          | 78.7 ms        | 1.57×   |
+| 32            | 380.5 ms          | 214.4 ms       | 1.77×   |
+| 64            | 726.0 ms          | 403.9 ms       | 1.80×   |
+
+The speedup is roughly flat across dataset size (~1.5× on a 5-field type) and
+grows with query depth and field count; on a wide real schema (~27 fields/type)
+it reaches ~2.4×. See [`example/BENCHMARKS.md`](example/BENCHMARKS.md) for the
+full size/depth/field sweeps.
+
+---
+
+## REST: `fastberry.rest`
+
+A nested serializer (DRF's `ModelSerializer`, or hand-rolled object-graph
+walking) builds an instance at every node of a relational tree and runs a
+per-field pipeline across the whole tree. On a deep tree (3-4 relations) this
+becomes the bottleneck even at a few hundred top-level objects.
+
+`fastberry.rest` declares the output shape once, then at serialization time
+fetches each level with a single column-projected query, assembles the tree in
+Python via indexed dicts (no N+1), and encodes with `orjson`. It is **read-only
+by design** — keep validation and writes on DRF or Pydantic.
+
+It works with **Django** and **SQLAlchemy** (the backend is chosen from the
+model class), so the same `FastRest` declarations run under Django/DRF or under
+FastAPI/SQLAlchemy. Needs the `rest` extra (`pip install 'fastberry[rest]'`); for
+SQLAlchemy use `pip install 'fastberry[sqlalchemy]'`.
+
+```python
+from fastberry.rest import FastRest
+
+
+class ProductRest(FastRest):
+    class Meta:
+        model = Product
+        fields = ["id", "name", "ean"]
+
+
+class StockRest(FastRest):
+    product = ProductRest()                # forward FK
+
+    class Meta:
+        model = Stock
+        fields = ["id", "title", "amount", "price"]
+
+
+class SpaceRest(FastRest):
+    stocks = StockRest(many=True)          # reverse FK
+
+    class Meta:
+        model = Space
+        fields = ["id", "name"]
+
+
+class HouseRest(FastRest):
+    spaces = SpaceRest(many=True)
+
+    class Meta:
+        model = House
+        fields = ["id", "name", "address"]
+
+
+rows = HouseRest.serialize(House.objects.all())       # list[dict]
+body = HouseRest.serialize_json(House.objects.all())  # bytes (orjson)
+```
+
+### SQLAlchemy / FastAPI
+
+The same schema classes work on SQLAlchemy mapped models — declare them against
+your SQLAlchemy classes instead. The only difference is that SQLAlchemy needs a
+session, so pass `session=` to `serialize*()` (a `select()` is optional for
+filtering/ordering; omit the source for all rows):
+
+```python
+rows = HouseRest.serialize(session=session)                       # all rows
+body = HouseRest.serialize_json(select(House).where(...), session=session)
+```
+
+In FastAPI, hand the bytes straight back — no DRF, no renderer:
+
+```python
+@app.get("/houses")
+def houses(session: Session = Depends(get_session)):
+    return Response(HouseRest.serialize_json(session=session),
+                    media_type="application/json")
+```
+
+This applies only when you use an ORM `fastberry.rest` understands (Django or
+SQLAlchemy) — not ORM-less stacks or other ORMs. See the runnable
+[`example/fastapi`](example/fastapi) project.
+
+### Decorate the model, render automatically (DRF)
+
+To skip wiring a schema per view, decorate the model with `@fast_rest` and use
+`FastJSONRenderer`. The view returns a raw queryset/instance; the renderer
+finds the registered schema and fast-serializes it. Unregistered models fall
+back to DRF's normal JSON.
+
+```python
+from fastberry.rest import fast_rest
+from fastberry.rest_renderers import FastJSONRenderer
+
+
+@fast_rest(fields=["id", "title", "amount"])     # explicit field list
+class Stock(models.Model): ...
+
+
+@fast_rest(depth=2)                               # auto-derive: expand 2 levels
+class House(models.Model): ...                    # FKs -> nested objects,
+                                                  # reverse FKs -> nested lists
+
+
+class HouseList(APIView):
+    renderer_classes = [FastJSONRenderer]
+    def get(self, request):
+        return Response(House.objects.all())      # no serializer needed
+```
+
+`@fast_rest` styles (mutually exclusive):
+
+- **`fields=[...]`** (+ optional `nested={"attr": SubSchema}`) — you control
+  exactly what is emitted. Recommended when the model has sensitive columns.
+- **`depth=N`** — auto-derive from the model's fields/relations, expanding `N`
+  relation levels (cycles broken by falling back to the FK id). `depth=0` emits
+  scalars + FK ids only. **Auto-derive emits every field at each expanded
+  level** — prefer explicit `fields` on models with secrets.
+- Omitted — all concrete fields, FKs as ids, no nesting.
+
+You can also register a hand-written nested `FastRest` for renderer pickup
+with `register_schema(Model, MyRest)`.
+
+Set `FastJSONRenderer` globally via DRF's `DEFAULT_RENDERER_CLASSES` to apply it
+everywhere; only `@fast_rest` models take the fast path, so it's safe alongside
+ordinary endpoints.
+
+**Benchmark** (the [`django` example](example/django); 200 houses × 4 spaces ×
+8 stocks = 6400 leaves, 4 levels deep, plus an FK to product; full tree
+queryset → JSON bytes, Postgres):
+
+| Approach                      | min ms  | queries | vs DRF+prefetch |
+| ----------------------------- | ------- | ------- | --------------- |
+| DRF nested, no prefetch       | 1891    | 7401    | 0.05×           |
+| DRF nested, with prefetch     | 91.6    | 4       | 1.0×            |
+| **fastberry.rest FastRest**   | **15.9**| **4**   | **5.8×**        |
+
+The advantage *grows* with payload size — ~3.4× at 300 leaves up to ~6.9× at
+32 000 — while the query count stays flat at 4. See
+[`example/BENCHMARKS.md`](example/BENCHMARKS.md) for the full sweep.
+
+Supported relations in this version: forward foreign key (single) and reverse
+foreign key / one-to-many (`many=True`), on both the Django and SQLAlchemy
+backends. ManyToMany is not yet handled.
+
+---
 
 ## Caveats
 
-- Built for **sync** Django execution. Async schemas don't hit the overhead
-  this targets.
-- `@fast_path` does its own field resolution, so it skips any custom logic that
-  `django_resolver` would otherwise apply. Use it on read-heavy, plain types;
-  keep complex types on the default path.
+- Built for **sync** Django execution. Async doesn't hit the overhead these
+  helpers target.
+- Both helpers are read-optimized. `@fast_path` skips custom resolver logic;
+  `fastberry.rest` does no validation. Use them on read-heavy paths; keep
+  complex/write logic on the default framework path.
 
 ## Links
 
+- Examples: [`example/`](example) — runnable Strawberry, Django REST, and
+  strawberry-django projects (each with a `docker-compose.yml`), plus
+  [`example/BENCHMARKS.md`](example/BENCHMARKS.md)
 - Source: <https://github.com/davidsarosi92/fastberry>
 - Issues: <https://github.com/davidsarosi92/fastberry/issues>
 

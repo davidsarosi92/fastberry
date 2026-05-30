@@ -1,0 +1,4 @@
+# fastberry itself is installed from the repo root (see Dockerfile / README).
+# The [asgi] extra pulls in starlette, which strawberry.asgi.GraphQL needs.
+strawberry-graphql[asgi]>=0.200
+uvicorn>=0.24
