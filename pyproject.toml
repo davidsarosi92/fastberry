@@ -40,9 +40,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/davidsarosi/fastberry"
-Repository = "https://github.com/davidsarosi/fastberry"
-Issues = "https://github.com/davidsarosi/fastberry/issues"
+Homepage = "https://github.com/davidsarosi92/fastberry"
+Repository = "https://github.com/davidsarosi92/fastberry"
+Issues = "https://github.com/davidsarosi92/fastberry/issues"
 
 [tool.hatch.version]
 source = "vcs"

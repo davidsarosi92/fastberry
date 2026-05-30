@@ -83,6 +83,11 @@ Your mileage will vary with field count and result-set size.
   `django_resolver` would otherwise apply. Use it on read-heavy, plain types;
   keep complex types on the default path.
 
+## Links
+
+- Source: <https://github.com/davidsarosi92/fastberry>
+- Issues: <https://github.com/davidsarosi92/fastberry/issues>
+
 ## License
 
 MIT
