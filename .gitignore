@@ -31,3 +31,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# hatch-vcs generated version file
+src/fastberry/_version.py

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "fastberry"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Performance helpers for strawberry-django: skip resolver overhead on sync Django."
 readme = "README.md"
 license = "MIT"
@@ -43,6 +43,12 @@ dev = [
 Homepage = "https://github.com/davidsarosi/fastberry"
 Repository = "https://github.com/davidsarosi/fastberry"
 Issues = "https://github.com/davidsarosi/fastberry/issues"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/fastberry/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fastberry"]
