@@ -2,18 +2,8 @@
 
 These exercise the registry/resolution logic in isolation, without spinning up a
 full Django app or GraphQL request, by faking the minimal strawberry/Django
-surface the extension touches.
+surface the extension touches. Django itself is configured once in conftest.py.
 """
-
-import django
-from django.conf import settings
-
-if not settings.configured:
-    settings.configure(
-        INSTALLED_APPS=["django.contrib.contenttypes", "django.contrib.auth"],
-        DATABASES={},
-    )
-    django.setup()
 
 import pytest
 

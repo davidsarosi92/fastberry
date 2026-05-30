@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: fastberry
+      POSTGRES_USER: fastberry
+      POSTGRES_PASSWORD: fastberry
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fastberry"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: ../..
+      dockerfile: example/django/Dockerfile
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: fastberry
+      DB_USER: fastberry
+      DB_PASSWORD: fastberry
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"

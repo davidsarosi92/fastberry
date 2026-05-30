@@ -1,0 +1,5 @@
+# fastberry[sqlalchemy] is installed from the repo root (see Dockerfile / README).
+fastapi>=0.110
+uvicorn[standard]>=0.24
+SQLAlchemy>=2.0
+psycopg[binary]>=3.1

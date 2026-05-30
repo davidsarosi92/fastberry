@@ -1,0 +1,7 @@
+services:
+  graphql:
+    build:
+      context: ../..
+      dockerfile: example/strawberry/Dockerfile
+    ports:
+      - "8000:8000"

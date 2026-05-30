@@ -1,0 +1,11 @@
+# The examples build with the repo root as context (to install local fastberry).
+# Keep the image lean and the build fast by excluding local-only artifacts.
+.venv
+**/__pycache__
+*.pyc
+.pytest_cache
+.idea
+dist
+*.egg-info
+# .git is intentionally NOT excluded: hatch-vcs reads it for the version.
+# (SETUPTOOLS_SCM_PRETEND_VERSION in the Dockerfiles is a fallback if it is.)
