@@ -23,6 +23,8 @@ Usage::
             return Response(House.objects.all())
 """
 
+from typing import Any
+
 from django.db.models import Model, QuerySet
 from rest_framework.renderers import JSONRenderer
 
@@ -35,7 +37,9 @@ class FastJSONRenderer(JSONRenderer):
     media_type = "application/json"
     format = "json"
 
-    def render(self, data, accepted_media_type=None, renderer_context=None):
+    def render(
+        self, data: Any, accepted_media_type: str | None = None, renderer_context: Any = None
+    ) -> bytes:
         schema, payload_is_list = self._resolve(data)
         if schema is not None:
             if payload_is_list:
@@ -45,7 +49,7 @@ class FastJSONRenderer(JSONRenderer):
         return super().render(data, accepted_media_type, renderer_context)
 
     @staticmethod
-    def _resolve(data):
+    def _resolve(data: Any) -> tuple[Any, bool]:
         """Return (schema, is_list) if ``data`` maps to a @fast_rest model."""
         if isinstance(data, QuerySet):
             return get_schema_for_model(data.model), True

@@ -42,7 +42,7 @@ jobs:
               capture_output=True, text=True,
           ).stdout
           score = json.loads(out)["typeCompleteness"]["completenessScore"]
-          floor = 0.60  # ratchet: raise as the public API gets annotated
+          floor = 0.95  # ratchet: public API is ~98.7% (only external DRF base unknown)
           print(f"public API type completeness: {score:.1%} (floor {floor:.0%})")
           sys.exit(0 if score >= floor else 1)
           PY

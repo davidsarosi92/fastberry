@@ -21,6 +21,7 @@ SQLAlchemy backend needs a ``Session``, which the caller threads in via
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,26 +56,26 @@ class ModelSpec:
     reverse_fks: list[ReverseFK]
 
     def __post_init__(self) -> None:
-        self.forward_by_attr = {f.attr: f for f in self.forward_fks}
-        self.reverse_by_attr = {r.accessor: r for r in self.reverse_fks}
+        self.forward_by_attr: dict[str, ForwardFK] = {f.attr: f for f in self.forward_fks}
+        self.reverse_by_attr: dict[str, ReverseFK] = {r.accessor: r for r in self.reverse_fks}
 
 
 class Backend:
     """Interface a model's ORM must satisfy. Stateless — methods take what they need."""
 
-    def introspect(self, model) -> ModelSpec:  # pragma: no cover - interface
+    def introspect(self, model: Any) -> ModelSpec:  # pragma: no cover - interface
         raise NotImplementedError
 
     def fetch(
         self,
-        model,
-        columns,
+        model: Any,
+        columns: Sequence[str],
         *,
         where_col: str | None = None,
-        where_values=None,
-        source=None,
-        session=None,
-    ) -> list:  # pragma: no cover - interface
+        where_values: Iterable[Any] | None = None,
+        source: Any = None,
+        session: Any = None,
+    ) -> list[dict[str, Any]]:  # pragma: no cover - interface
         """Return rows of ``model`` (as dicts) projecting ``columns``.
 
         Exactly one of ``source`` (a caller-provided query for the top level) or
@@ -88,7 +89,7 @@ class Backend:
 
 
 class DjangoBackend(Backend):
-    def introspect(self, model) -> ModelSpec:
+    def introspect(self, model: Any) -> ModelSpec:
         from django.db import models
 
         meta = model._meta
@@ -125,10 +126,19 @@ class DjangoBackend(Backend):
         return ModelSpec(meta.pk.name, scalars, fk_cols, set(decimals), forward, reverse)
 
     def fetch(
-        self, model, columns, *, where_col=None, where_values=None, source=None, session=None
-    ):
+        self,
+        model: Any,
+        columns: Sequence[str],
+        *,
+        where_col: str | None = None,
+        where_values: Iterable[Any] | None = None,
+        source: Any = None,
+        session: Any = None,
+    ) -> list[dict[str, Any]]:
         qs = source if source is not None else model._default_manager.all()
         if where_col is not None:
+            # where_values is paired with where_col by the caller; narrow it
+            assert where_values is not None  # noqa: S101
             qs = qs.filter(**{f"{where_col}__in": list(where_values)})
         return list(qs.values(*columns))
 
@@ -137,7 +147,7 @@ class DjangoBackend(Backend):
 
 
 class SQLAlchemyBackend(Backend):
-    def introspect(self, model) -> ModelSpec:
+    def introspect(self, model: Any) -> ModelSpec:
         from sqlalchemy import inspect as sa_inspect
         from sqlalchemy import types as satypes
         from sqlalchemy.orm import interfaces
@@ -192,8 +202,15 @@ class SQLAlchemyBackend(Backend):
         return ModelSpec(pk_name, scalars, fk_cols, set(decimals), forward, reverse)
 
     def fetch(
-        self, model, columns, *, where_col=None, where_values=None, source=None, session=None
-    ):
+        self,
+        model: Any,
+        columns: Sequence[str],
+        *,
+        where_col: str | None = None,
+        where_values: Iterable[Any] | None = None,
+        source: Any = None,
+        session: Any = None,
+    ) -> list[dict[str, Any]]:
         from sqlalchemy import select
 
         if session is None:
@@ -208,6 +225,8 @@ class SQLAlchemyBackend(Backend):
         else:
             stmt = select(*(getattr(model, c) for c in columns))
             if where_col is not None:
+                # where_values is paired with where_col by the caller; narrow it
+                assert where_values is not None  # noqa: S101
                 stmt = stmt.where(getattr(model, where_col).in_(list(where_values)))
         return [dict(row) for row in session.execute(stmt).mappings().all()]
 
@@ -219,7 +238,7 @@ _SQLALCHEMY = SQLAlchemyBackend()
 _SPEC_CACHE: dict = {}
 
 
-def get_backend(model) -> Backend:
+def get_backend(model: Any) -> Backend:
     """Return the backend for ``model`` (Django model or SQLAlchemy mapped class).
 
     Both ORMs are optional: Django comes with the ``rest`` extra, SQLAlchemy
@@ -252,7 +271,7 @@ def get_backend(model) -> Backend:
     )
 
 
-def introspect(model) -> ModelSpec:
+def introspect(model: Any) -> ModelSpec:
     """Introspect ``model`` to a :class:`ModelSpec`, cached per model class."""
     spec = _SPEC_CACHE.get(model)
     if spec is None:
