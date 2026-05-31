@@ -80,6 +80,9 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "nox>=2024.4",
+    "pre-commit>=3.7",
+    "pyright>=1.1.400",
+    "pip-audit>=2.7",
 ]
 
 [project.urls]

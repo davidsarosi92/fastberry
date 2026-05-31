@@ -32,6 +32,21 @@ jobs:
       - name: mypy
         run: mypy
 
+      - name: pyright — public API type completeness
+        run: |
+          pip install pyright==1.1.409
+          python - <<'PY'
+          import json, subprocess, sys
+          out = subprocess.run(
+              ["pyright", "--verifytypes", "fastberry", "--ignoreexternal", "--outputjson"],
+              capture_output=True, text=True,
+          ).stdout
+          score = json.loads(out)["typeCompleteness"]["completenessScore"]
+          floor = 0.60  # ratchet: raise as the public API gets annotated
+          print(f"public API type completeness: {score:.1%} (floor {floor:.0%})")
+          sys.exit(0 if score >= floor else 1)
+          PY
+
   test:
     runs-on: ubuntu-latest
     strategy:
