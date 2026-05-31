@@ -32,29 +32,31 @@ Needs the ``strawberry-graphql-django`` package (the ``graphql`` extra:
 """
 
 import builtins
+from collections.abc import Callable, Sequence
 from functools import wraps
+from typing import Any
 
 from fastberry.fastpath import fast_path
 
 try:
     import strawberry_django as _strawberry_django
-except ImportError as exc:  # pragma: no cover - exercised via install extras
+except ImportError as _exc:  # pragma: no cover - exercised via install extras
     raise ImportError(
         "fastberry.strawberry_django requires strawberry-graphql-django. "
         "Install it with: pip install 'fastberry[graphql]'"
-    ) from exc
+    ) from _exc
 
 __all__ = ["fast_schema", "interface", "type"]
 
 
-def _wrap(sd_decorator_factory):
+def _wrap(sd_decorator_factory: Any) -> Callable[..., Any]:
     """Build a fast_path-applying passthrough for a strawberry_django decorator."""
 
     @wraps(sd_decorator_factory)
-    def factory(*args, **kwargs):
+    def factory(*args: Any, **kwargs: Any) -> Callable[[Any], Any]:
         sd_decorator = sd_decorator_factory(*args, **kwargs)
 
-        def apply(cls):
+        def apply(cls: Any) -> Any:
             # Apply strawberry_django's decorator first (it builds
             # __strawberry_definition__), then fast_path on top.
             return fast_path(sd_decorator(cls))
@@ -65,11 +67,17 @@ def _wrap(sd_decorator_factory):
 
 
 # Mirror the strawberry_django decorators we want to fast-path.
-type = _wrap(_strawberry_django.type)
-interface = _wrap(_strawberry_django.interface)
+type: Callable[..., Any] = _wrap(_strawberry_django.type)
+interface: Callable[..., Any] = _wrap(_strawberry_django.interface)
 
 
-def fast_schema(_model=None, *, fields=None, name=None, **type_kwargs):
+def fast_schema(
+    _model: Any = None,
+    *,
+    fields: Sequence[str] | None = None,
+    name: str | None = None,
+    **type_kwargs: Any,
+) -> Any:
     """Generate a fast-pathed ``strawberry_django`` type from a Django model.
 
     Decorate the model itself. A GraphQL type is built from the model's fields
@@ -95,7 +103,7 @@ def fast_schema(_model=None, *, fields=None, name=None, **type_kwargs):
     composes cleanly with other model decorators.
     """
 
-    def wrap(model):
+    def wrap(model: Any) -> Any:
         # strawberry_django expands all model fields unless restricted via its
         # own ``fields`` argument, so the field set is controlled there (not via
         # the class annotations, which it does not treat as an allow-list).

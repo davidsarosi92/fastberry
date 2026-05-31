@@ -25,6 +25,14 @@ helper is used.
 """
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Static re-export for type checkers / IDEs. At runtime these names are
+    # resolved lazily by __getattr__ below, so importing fastberry (or
+    # fastberry.rest) never pulls in strawberry + Django here.
+    from fastberry.fastpath import FastPathExtension as FastPathExtension
+    from fastberry.fastpath import fast_path as fast_path
 
 __all__ = ["FastPathExtension", "__version__", "fast_path"]
 
@@ -36,7 +44,7 @@ except PackageNotFoundError:  # package is not installed (e.g. running from sour
 _LAZY = {"FastPathExtension", "fast_path"}
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     # Import the GraphQL helpers only on first access so REST/SQLAlchemy-only
     # users never trigger the strawberry + Django imports in fastberry.fastpath.
     if name in _LAZY:
@@ -46,5 +54,5 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def __dir__():
+def __dir__() -> list[str]:
     return sorted(__all__)

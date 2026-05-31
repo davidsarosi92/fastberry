@@ -51,18 +51,18 @@ Supported relations: forward foreign key (single) and reverse foreign key /
 one-to-many (``many=True``). ManyToMany is not handled.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from decimal import Decimal
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 from fastberry.rest_backends import Backend, ModelSpec, get_backend, introspect
 
 try:
     import orjson
-except ImportError as exc:  # pragma: no cover - exercised via install extras
+except ImportError as _exc:  # pragma: no cover - exercised via install extras
     raise ImportError(
         "fastberry.rest requires orjson. Install it with: pip install 'fastberry[rest]'"
-    ) from exc
+    ) from _exc
 
 __all__ = ["FastRest", "fast_rest", "get_schema_for_model", "register_schema"]
 
@@ -75,7 +75,7 @@ _SCHEMA_REGISTRY: dict[type, "type[FastRest]"] = {}
 _SCHEMA_BUILDERS: dict[type, Callable[[], "type[FastRest]"]] = {}
 
 
-def register_schema(model, schema) -> None:
+def register_schema(model: Any, schema: "type[FastRest]") -> None:
     """Associate a hand-written FastRest subclass with a model.
 
     Lets a renderer (or any caller) find the schema for a model instance or
@@ -86,12 +86,12 @@ def register_schema(model, schema) -> None:
     model.__fast_schema__ = schema
 
 
-def _register_lazy(model, builder) -> None:
+def _register_lazy(model: Any, builder: "Callable[[], type[FastRest]]") -> None:
     """Register a builder to construct the schema on first lookup."""
     _SCHEMA_BUILDERS[model] = builder
 
 
-def get_schema_for_model(model):
+def get_schema_for_model(model: Any) -> "type[FastRest] | None":
     """Return the FastRest for ``model``, or ``None``.
 
     Resolves and caches a lazily-registered (auto-derived) schema on first use.
@@ -112,7 +112,15 @@ class _NestedSpec:
 
     __slots__ = ("attr", "child_fk_attname", "fk_attname", "forward", "many", "schema")
 
-    def __init__(self, attr, schema, many, forward, fk_attname, child_fk_attname):
+    def __init__(
+        self,
+        attr: str,
+        schema: "type[FastRest]",
+        many: bool,
+        forward: bool,
+        fk_attname: str | None,
+        child_fk_attname: str | None,
+    ) -> None:
         self.attr = attr
         self.schema = schema
         self.many = many
@@ -122,8 +130,13 @@ class _NestedSpec:
 
 
 class FastRestMeta(type):
-    def __new__(mcs, name, bases, namespace):
-        cls = super().__new__(mcs, name, bases, namespace)
+    def __new__(
+        mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]
+    ) -> "type[FastRest]":
+        # The produced class is a FastRest subclass; cast so the attribute
+        # wiring below (and callers) see the FastRest interface, not the bare
+        # metaclass.
+        cls = cast("type[FastRest]", super().__new__(mcs, name, bases, namespace))
 
         meta = namespace.get("Meta")
         if meta is None:
@@ -191,14 +204,14 @@ class FastRest(metaclass=FastRestMeta):
     _decimal_fields: ClassVar[list[str]]
     _nested: ClassVar[list[_NestedSpec]]
 
-    def __init__(self, many: bool = False):
+    def __init__(self, many: bool = False) -> None:
         # Instances act as nested-relation markers in a parent schema body.
         self.many = many
 
     # --- public API ---------------------------------------------------------
 
     @classmethod
-    def serialize(cls, source=None, *, session=None) -> list:
+    def serialize(cls, source: Any = None, *, session: Any = None) -> list[dict[str, Any]]:
         """Serialize to a list of plain dicts.
 
         ``source`` is a Django queryset, a SQLAlchemy ``select()``, or ``None``
@@ -207,12 +220,12 @@ class FastRest(metaclass=FastRestMeta):
         return cls._collect(source=source, session=session)
 
     @classmethod
-    def serialize_json(cls, source=None, *, session=None) -> bytes:
+    def serialize_json(cls, source: Any = None, *, session: Any = None) -> bytes:
         """Serialize directly to JSON bytes via orjson."""
         return orjson.dumps(cls._collect(source=source, session=session))
 
     @classmethod
-    def serialize_obj(cls, obj, *, session=None):
+    def serialize_obj(cls, obj: Any, *, session: Any = None) -> dict[str, Any] | None:
         """Serialize a single model instance to one dict.
 
         Convenience for detail endpoints. Internally reuses the list path on a
@@ -223,7 +236,7 @@ class FastRest(metaclass=FastRestMeta):
         return rows[0] if rows else None
 
     @classmethod
-    def serialize_obj_json(cls, obj, *, session=None) -> bytes:
+    def serialize_obj_json(cls, obj: Any, *, session: Any = None) -> bytes:
         """Serialize a single model instance directly to JSON bytes."""
         return orjson.dumps(cls.serialize_obj(obj, session=session))
 
@@ -231,8 +244,14 @@ class FastRest(metaclass=FastRestMeta):
 
     @classmethod
     def _collect(
-        cls, *, source=None, session=None, where_col=None, where_values=None, extra_keep=()
-    ) -> list:
+        cls,
+        *,
+        source: Any = None,
+        session: Any = None,
+        where_col: str | None = None,
+        where_values: Iterable[Any] | None = None,
+        extra_keep: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
         pk = cls._pk_name
 
         # Columns we must fetch: declared scalars, pk (for joins), forward FK
@@ -241,7 +260,7 @@ class FastRest(metaclass=FastRestMeta):
         value_fields = set(cls._declared_fields)
         value_fields.add(pk)
         for spec in cls._nested:
-            if spec.forward:
+            if spec.forward and spec.fk_attname is not None:
                 value_fields.add(spec.fk_attname)
         value_fields.update(extra_keep)
 
@@ -275,9 +294,11 @@ class FastRest(metaclass=FastRestMeta):
         return rows
 
     @classmethod
-    def _attach_forward(cls, rows, spec, session):
+    def _attach_forward(cls, rows: list[dict[str, Any]], spec: _NestedSpec, session: Any) -> None:
         sub = spec.schema
         fk = spec.fk_attname
+        # forward spec always carries its fk column; narrow for the type checker
+        assert fk is not None  # noqa: S101
         ids = {r[fk] for r in rows if r.get(fk) is not None}
 
         index = {}
@@ -300,13 +321,15 @@ class FastRest(metaclass=FastRestMeta):
             r[spec.attr] = index.get(r.get(fk))
 
     @classmethod
-    def _attach_reverse(cls, rows, spec, session):
+    def _attach_reverse(cls, rows: list[dict[str, Any]], spec: _NestedSpec, session: Any) -> None:
         sub = spec.schema
         child_fk = spec.child_fk_attname
+        # reverse spec always carries the child fk column; narrow for the type checker
+        assert child_fk is not None  # noqa: S101
         parent_pk = cls._pk_name
         parent_ids = [r[parent_pk] for r in rows]
 
-        groups = {}
+        groups: dict[Any, list[dict[str, Any]]] = {}
         if parent_ids:
             child_rows = sub._collect(
                 where_col=child_fk,
@@ -328,13 +351,13 @@ class FastRest(metaclass=FastRestMeta):
 # --- @fast_rest decorator + auto-derive -------------------------------------
 
 
-def _concrete_field_names(model):
+def _concrete_field_names(model: Any) -> list[str]:
     """Local (non-relational) field names + FK ids, for default scalar output."""
     spec = introspect(model)
     return list(spec.scalar_fields) + list(spec.fk_columns)
 
 
-def _build_auto_schema(model, depth, _seen):
+def _build_auto_schema(model: Any, depth: int, _seen: frozenset[Any]) -> "type[FastRest]":
     """Build a FastRest for ``model`` automatically from its fields.
 
     ``depth`` controls how many relation levels to expand:
@@ -347,7 +370,7 @@ def _build_auto_schema(model, depth, _seen):
     """
     spec = introspect(model)
 
-    namespace = {}
+    namespace: dict[str, Any] = {}
     fields = list(spec.scalar_fields)
 
     if depth <= 0:
@@ -372,10 +395,16 @@ def _build_auto_schema(model, depth, _seen):
     Meta = type("Meta", (), {"model": model, "fields": fields})
     namespace["Meta"] = Meta
     name = f"_Auto{model.__name__}Rest"
-    return FastRestMeta(name, (FastRest,), namespace)
+    return cast("type[FastRest]", FastRestMeta(name, (FastRest,), namespace))
 
 
-def fast_rest(_cls=None, *, fields=None, nested=None, depth=None):
+def fast_rest(
+    _cls: Any = None,
+    *,
+    fields: Sequence[str] | None = None,
+    nested: "dict[str, type[FastRest]] | None" = None,
+    depth: int | None = None,
+) -> Any:
     """Class decorator: attach a read-only FastRest to a model.
 
     Works for Django models and SQLAlchemy mapped classes alike. The schema is
@@ -432,6 +461,6 @@ def fast_rest(_cls=None, *, fields=None, nested=None, depth=None):
     return wrap if _cls is None else wrap(_cls)
 
 
-def _is_to_many(model, attr):
+def _is_to_many(model: Any, attr: str) -> bool:
     """True if ``attr`` on ``model`` is a reverse FK / to-many relation."""
     return attr in introspect(model).reverse_by_attr
