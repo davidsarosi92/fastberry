@@ -5,9 +5,9 @@ from django.db import models
 
 pytest.importorskip("strawberry_django")
 
-from fastberry import strawberry_django as fast_sd  # noqa: E402
-from fastberry.strawberry_django import fast_schema  # noqa: E402
-from fastberry.fastpath import FastPathExtension  # noqa: E402
+from fastberry import strawberry_django as fast_sd
+from fastberry.fastpath import FastPathExtension
+from fastberry.strawberry_django import fast_schema
 
 
 class WrapStock(models.Model):
@@ -52,6 +52,7 @@ def test_returns_the_class():
 
 
 # --- fast_schema: generate the type from the model --------------------------
+
 
 def test_fast_schema_generates_and_fast_paths():
     @fast_schema

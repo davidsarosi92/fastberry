@@ -17,8 +17,8 @@ from fastberry.rest import (
     register_schema,
 )
 
-
 # --- models -----------------------------------------------------------------
+
 
 class Maker(models.Model):
     name = models.CharField(max_length=100)
@@ -72,6 +72,7 @@ def _schema():
 
 # --- explicit fields --------------------------------------------------------
 
+
 def test_explicit_fields_registered():
     schema = get_schema_for_model(Brand)
     assert schema is not None
@@ -103,6 +104,7 @@ def test_default_fields_when_omitted():
 
 # --- auto-derive depth ------------------------------------------------------
 
+
 def test_auto_derive_expands_reverse_fk():
     schema = get_schema_for_model(Shelf)
     rows = schema.serialize(Shelf.objects.all())
@@ -128,6 +130,7 @@ def test_auto_derive_depth_zero_no_nesting():
 
 # --- register_schema (hand-written schema) ----------------------------------
 
+
 def test_register_schema_manual():
     class MakerSchema(FastRest):
         class Meta:
@@ -142,8 +145,10 @@ def test_register_schema_manual():
 
 # --- both styles rejected together ------------------------------------------
 
+
 def test_depth_and_fields_conflict():
     with pytest.raises(TypeError):
+
         @fast_rest(depth=1, fields=["id"])
         class Bad(models.Model):
             class Meta:
@@ -151,6 +156,7 @@ def test_depth_and_fields_conflict():
 
 
 # --- single object helpers --------------------------------------------------
+
 
 def test_serialize_obj():
     schema = get_schema_for_model(Brand)

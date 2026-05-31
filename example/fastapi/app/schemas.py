@@ -4,9 +4,8 @@ Declaration is identical to the Django example — only the serialize() calls
 differ (a SQLAlchemy session is threaded in; see app/main.py).
 """
 
-from fastberry.rest import FastRest
-
 from app.models import House, Product, Space, Stock
+from fastberry.rest import FastRest
 
 
 class ProductRest(FastRest):
@@ -16,7 +15,7 @@ class ProductRest(FastRest):
 
 
 class StockRest(FastRest):
-    product = ProductRest()                # forward FK
+    product = ProductRest()  # forward FK
 
     class Meta:
         model = Stock
@@ -24,7 +23,7 @@ class StockRest(FastRest):
 
 
 class SpaceRest(FastRest):
-    stocks = StockRest(many=True)          # reverse FK / one-to-many
+    stocks = StockRest(many=True)  # reverse FK / one-to-many
 
     class Meta:
         model = Space

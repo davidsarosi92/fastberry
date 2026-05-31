@@ -27,16 +27,24 @@ def orm_nested(session):
     houses = session.execute(stmt).scalars().all()
     return [
         {
-            "id": h.id, "name": h.name, "address": h.address,
+            "id": h.id,
+            "name": h.name,
+            "address": h.address,
             "spaces": [
                 {
-                    "id": sp.id, "name": sp.name,
+                    "id": sp.id,
+                    "name": sp.name,
                     "stocks": [
                         {
-                            "id": st.id, "title": st.title, "amount": st.amount,
+                            "id": st.id,
+                            "title": st.title,
+                            "amount": st.amount,
                             "price": str(st.price),
-                            "product": {"id": st.product.id, "name": st.product.name,
-                                        "ean": st.product.ean},
+                            "product": {
+                                "id": st.product.id,
+                                "name": st.product.name,
+                                "ean": st.product.ean,
+                            },
                         }
                         for st in sp.stocks
                     ],

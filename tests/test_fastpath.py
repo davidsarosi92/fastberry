@@ -9,8 +9,8 @@ import pytest
 
 from fastberry.fastpath import FastPathExtension, fast_path
 
-
 # --- minimal fakes for the strawberry surface fast_path/register inspect -------
+
 
 class _FakeBaseResolver:
     def __init__(self, fn):
@@ -62,6 +62,7 @@ def _sentinel_next(*args, **kwargs):
 
 
 # --- tests --------------------------------------------------------------------
+
 
 def test_plain_field_getattr():
     fast_path(_make_type("WidgetType", [_FakeField("title")]))

@@ -5,9 +5,8 @@ register it with ``register_schema`` so ``FastJSONRenderer`` picks it up. This
 is the way to expose a curated, safe subset of columns.
 """
 
-from fastberry.rest import FastRest, register_schema
-
 from catalog.models import Product
+from fastberry.rest import FastRest, register_schema
 
 
 class ProductRest(FastRest):

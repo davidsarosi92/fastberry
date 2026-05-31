@@ -34,11 +34,12 @@ GraphQL type name string) as the lookup key.
 """
 
 import inspect
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from django.db.models import Manager
+from graphql import GraphQLResolveInfo
 from strawberry.extensions import SchemaExtension
-from strawberry.types import Info
 from strawberry.utils.str_converters import to_camel_case
 
 __all__ = ["FastPathExtension", "fast_path"]
@@ -52,13 +53,13 @@ class FastPathExtension(SchemaExtension):
     """
 
     # Set of GraphQL type names (str) that have fast-path enabled.
-    _fast_path_type_names: set[str] = set()
+    _fast_path_type_names: ClassVar[set[str]] = set()
 
     # Pre-built resolver cache:
     #   (graphql_type_name, graphql_field_name) -> attr_name (str)
     #                                            |  (resolver_fn, param_count) (tuple)
     # Built at decoration time by register(), never modified at request time.
-    _registry: dict[tuple[str, str], Union[str, tuple[Callable, int]]] = {}
+    _registry: ClassVar[dict[tuple[str, str], str | tuple[Callable, int]]] = {}
 
     @classmethod
     def register(cls, strawberry_cls: type) -> None:
@@ -66,7 +67,7 @@ class FastPathExtension(SchemaExtension):
 
         Called by :func:`fast_path` at class-definition time.
         """
-        defn = strawberry_cls.__strawberry_definition__
+        defn = strawberry_cls.__strawberry_definition__  # type: ignore[attr-defined]
         type_name: str = defn.name  # GraphQL type name (e.g. 'MyType')
         cls._fast_path_type_names.add(type_name)
         for field in defn.fields:
@@ -79,7 +80,9 @@ class FastPathExtension(SchemaExtension):
             else:
                 cls._registry[key] = field.name  # Python attribute name -> getattr
 
-    def resolve(self, _next: Callable, root: Any, info: Info, *args: Any, **kwargs: Any) -> Any:
+    def resolve(
+        self, _next: Callable, root: Any, info: GraphQLResolveInfo, *args: Any, **kwargs: Any
+    ) -> Any:
         type_name: str = info.parent_type.name
         if type_name not in self._fast_path_type_names:
             return _next(root, info, *args, **kwargs)

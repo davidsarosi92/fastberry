@@ -51,9 +51,7 @@ def build_dataset(
                     )
                 )
             spaces.append(SpaceType(id=space_id, name=f"Space {space_id}", stocks=stocks))
-        result.append(
-            HouseType(id=h, name=f"House {h}", address=f"Main St {h}", spaces=spaces)
-        )
+        result.append(HouseType(id=h, name=f"House {h}", address=f"Main St {h}", spaces=spaces))
     return result
 
 

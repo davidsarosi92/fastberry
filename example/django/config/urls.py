@@ -1,6 +1,5 @@
-from django.urls import path
-
 from catalog import views
+from django.urls import path
 
 urlpatterns = [
     # Auto-derived schema via @fast_rest(depth=...), rendered by FastJSONRenderer.

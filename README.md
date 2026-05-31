@@ -1,28 +1,34 @@
 # fastberry
 
-Performance helpers for **synchronous** Django, on both GraphQL and REST.
+Performance helpers for read-heavy Python web APIs, on both GraphQL and REST.
 
-Under sync Django, the per-instance / per-field overhead of GraphQL and REST
-frameworks dominates response time on large or deeply-nested payloads — pure
-CPU cost with no extra database work. `fastberry` lets you opt specific hot
-paths out of that machinery.
+On large or deeply-nested payloads, the per-instance / per-field overhead of
+GraphQL and REST frameworks dominates response time — pure CPU cost with no
+extra database work. `fastberry` lets you opt specific hot paths out of that
+machinery.
 
-Two independent helpers:
+Two independent helpers, usable separately:
 
 - **`fast_path`** (GraphQL) — skip `strawberry-django`'s `django_resolver`
-  overhead on hot types.
-- **`fastberry.rest`** — read-only nested REST serialization that assembles the
-  tree from `.values()` queries and encodes with `orjson`.
+  overhead on hot types. Targets **sync Django**.
+- **`fastberry.rest`** (REST) — read-only nested serialization that assembles
+  the tree from column-projected queries and encodes with `orjson`. Works on
+  both **Django/DRF** and **FastAPI/SQLAlchemy** — the backend is picked from
+  the model class.
 
 ## Install
 
+The core package has no hard dependencies; pick the extra for the helper you
+want, and only that stack gets pulled in:
+
 ```bash
-pip install fastberry                # GraphQL helpers
-pip install 'fastberry[rest]'        # also enables fastberry.rest (pulls in orjson)
-pip install 'fastberry[sqlalchemy]'  # fastberry.rest on SQLAlchemy (e.g. FastAPI)
+pip install 'fastberry[graphql]'     # GraphQL: fast_path on strawberry-django (+ Django, strawberry)
+pip install 'fastberry[rest]'        # REST on Django/DRF (+ Django, orjson)
+pip install 'fastberry[sqlalchemy]'  # REST on FastAPI/SQLAlchemy — no Django (+ SQLAlchemy, orjson)
 ```
 
-Requires Python 3.10+, Django 4.2+.
+Requires Python 3.10+. Django (4.2+) is only installed by the `graphql` and
+`rest` extras; the `sqlalchemy` extra is Django-free.
 
 ---
 
@@ -63,7 +69,8 @@ schema = strawberry.Schema(query=Query, extensions=[FastPathExtension])
 
 Only types decorated with `@fast_path` take the fast path; everything else
 resolves normally. To turn it off, remove the extension (global) or the
-decorator (per type).
+decorator (per type). Needs the `graphql` extra
+(`pip install 'fastberry[graphql]'`).
 
 ### One decorator instead of two
 
@@ -142,10 +149,13 @@ fetches each level with a single column-projected query, assembles the tree in
 Python via indexed dicts (no N+1), and encodes with `orjson`. It is **read-only
 by design** — keep validation and writes on DRF or Pydantic.
 
-It works with **Django** and **SQLAlchemy** (the backend is chosen from the
-model class), so the same `FastRest` declarations run under Django/DRF or under
-FastAPI/SQLAlchemy. Needs the `rest` extra (`pip install 'fastberry[rest]'`); for
-SQLAlchemy use `pip install 'fastberry[sqlalchemy]'`.
+It works on **Django/DRF** and **FastAPI/SQLAlchemy** as equal, first-class
+backends: you write the `FastRest` declaration once and the backend is picked
+from the model class. Needs the `rest` extra for Django
+(`pip install 'fastberry[rest]'`) or the `sqlalchemy` extra for SQLAlchemy
+(`pip install 'fastberry[sqlalchemy]'`).
+
+### Declare the shape (both backends)
 
 ```python
 from fastberry.rest import FastRest
@@ -179,43 +189,25 @@ class HouseRest(FastRest):
     class Meta:
         model = House
         fields = ["id", "name", "address"]
+```
 
+The same four classes run unchanged whether `Product`/`Stock`/`Space`/`House`
+are Django models or SQLAlchemy mapped classes — only the call that drives them
+differs, as shown below.
 
+### Django / DRF
+
+Serialize a queryset directly:
+
+```python
 rows = HouseRest.serialize(House.objects.all())       # list[dict]
 body = HouseRest.serialize_json(House.objects.all())  # bytes (orjson)
 ```
 
-### SQLAlchemy / FastAPI
-
-The same schema classes work on SQLAlchemy mapped models — declare them against
-your SQLAlchemy classes instead. The only difference is that SQLAlchemy needs a
-session, so pass `session=` to `serialize*()` (a `select()` is optional for
-filtering/ordering; omit the source for all rows):
-
-```python
-rows = HouseRest.serialize(session=session)                       # all rows
-body = HouseRest.serialize_json(select(House).where(...), session=session)
-```
-
-In FastAPI, hand the bytes straight back — no DRF, no renderer:
-
-```python
-@app.get("/houses")
-def houses(session: Session = Depends(get_session)):
-    return Response(HouseRest.serialize_json(session=session),
-                    media_type="application/json")
-```
-
-This applies only when you use an ORM `fastberry.rest` understands (Django or
-SQLAlchemy) — not ORM-less stacks or other ORMs. See the runnable
-[`example/fastapi`](example/fastapi) project.
-
-### Decorate the model, render automatically (DRF)
-
-To skip wiring a schema per view, decorate the model with `@fast_rest` and use
-`FastJSONRenderer`. The view returns a raw queryset/instance; the renderer
-finds the registered schema and fast-serializes it. Unregistered models fall
-back to DRF's normal JSON.
+Or skip wiring a schema per view: decorate the model with `@fast_rest` and use
+`FastJSONRenderer`. The view returns a raw queryset/instance; the renderer finds
+the registered schema and fast-serializes it. Unregistered models fall back to
+DRF's normal JSON.
 
 ```python
 from fastberry.rest import fast_rest
@@ -247,16 +239,41 @@ class HouseList(APIView):
   level** — prefer explicit `fields` on models with secrets.
 - Omitted — all concrete fields, FKs as ids, no nesting.
 
-You can also register a hand-written nested `FastRest` for renderer pickup
-with `register_schema(Model, MyRest)`.
+You can also register a hand-written nested `FastRest` for renderer pickup with
+`register_schema(Model, MyRest)`. Set `FastJSONRenderer` globally via DRF's
+`DEFAULT_RENDERER_CLASSES` to apply it everywhere; only `@fast_rest` models take
+the fast path, so it's safe alongside ordinary endpoints.
 
-Set `FastJSONRenderer` globally via DRF's `DEFAULT_RENDERER_CLASSES` to apply it
-everywhere; only `@fast_rest` models take the fast path, so it's safe alongside
-ordinary endpoints.
+### FastAPI / SQLAlchemy
 
-**Benchmark** (the [`django` example](example/django); 200 houses × 4 spaces ×
-8 stocks = 6400 leaves, 4 levels deep, plus an FK to product; full tree
-queryset → JSON bytes, Postgres):
+Declare the same classes against your SQLAlchemy models. SQLAlchemy needs a
+session, so pass `session=` to `serialize*()` (a `select()` is optional for
+filtering/ordering; omit the source for all rows):
+
+```python
+rows = HouseRest.serialize(session=session)                       # all rows
+body = HouseRest.serialize_json(select(House).where(...), session=session)
+```
+
+In FastAPI, hand the bytes straight back — no DRF, no renderer:
+
+```python
+@app.get("/houses")
+def houses(session: Session = Depends(get_session)):
+    return Response(HouseRest.serialize_json(session=session),
+                    media_type="application/json")
+```
+
+See the runnable [`example/fastapi`](example/fastapi) project. (This works only
+with an ORM `fastberry.rest` understands — Django or SQLAlchemy — not ORM-less
+stacks or other ORMs.)
+
+### Benchmark
+
+Measured on the [`django` example](example/django); the SQLAlchemy backend runs
+the same column-projected, one-query-per-level fetch. 200 houses × 4 spaces × 8
+stocks = 6400 leaves, 4 levels deep, plus an FK to product; full tree queryset →
+JSON bytes, Postgres:
 
 | Approach                      | min ms  | queries | vs DRF+prefetch |
 | ----------------------------- | ------- | ------- | --------------- |
@@ -276,17 +293,18 @@ backends. ManyToMany is not yet handled.
 
 ## Caveats
 
-- Built for **sync** Django execution. Async doesn't hit the overhead these
-  helpers target.
+- `@fast_path` targets **sync Django** specifically — async resolution doesn't
+  pay the `django_resolver` overhead it removes. `fastberry.rest` has no such
+  restriction; it works on Django/DRF and FastAPI/SQLAlchemy alike.
 - Both helpers are read-optimized. `@fast_path` skips custom resolver logic;
   `fastberry.rest` does no validation. Use them on read-heavy paths; keep
   complex/write logic on the default framework path.
 
 ## Links
 
-- Examples: [`example/`](example) — runnable Strawberry, Django REST, and
-  strawberry-django projects (each with a `docker-compose.yml`), plus
-  [`example/BENCHMARKS.md`](example/BENCHMARKS.md)
+- Examples: [`example/`](example) — runnable Strawberry, strawberry-django,
+  Django/DRF, and FastAPI/SQLAlchemy projects (each with a
+  `docker-compose.yml`), plus [`example/BENCHMARKS.md`](example/BENCHMARKS.md)
 - Source: <https://github.com/davidsarosi92/fastberry>
 - Issues: <https://github.com/davidsarosi92/fastberry/issues>
 

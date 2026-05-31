@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "fastberry"
 dynamic = ["version"]
-description = "Performance helpers for strawberry-django: skip resolver overhead on sync Django."
+description = "Performance helpers that skip per-field GraphQL and REST serialization overhead on Django, DRF, and FastAPI/SQLAlchemy."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -13,10 +13,22 @@ requires-python = ">=3.10"
 authors = [
     { name = "Dávid Sárosi" },
 ]
-keywords = ["strawberry", "graphql", "django", "performance", "strawberry-django"]
+keywords = [
+    "performance",
+    "graphql",
+    "rest",
+    "strawberry",
+    "strawberry-django",
+    "django",
+    "drf",
+    "fastapi",
+    "sqlalchemy",
+    "orjson",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: Django",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -24,28 +36,38 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-dependencies = [
-    "strawberry-graphql>=0.200",
-    "Django>=4.2",
-]
+# The core package has no hard runtime dependencies. Each helper pulls only
+# what it needs via an extra, so a REST/SQLAlchemy user never installs Django
+# or strawberry, and a GraphQL user never installs orjson.
+dependencies = []
 
 [project.optional-dependencies]
-# Read-only REST serialization (fastberry.rest) needs a fast JSON encoder.
+# GraphQL: fast_path / FastPathExtension and the fast_strawberry_django wrapper.
+graphql = [
+    "strawberry-graphql>=0.200",
+    "strawberry-graphql-django>=0.20",
+    "Django>=4.2",
+]
+# Read-only REST serialization (fastberry.rest) on the Django ORM / DRF.
+# Needs Django and a fast JSON encoder.
 rest = [
     "orjson>=3.9",
+    "Django>=4.2",
 ]
-# The fast_strawberry_django wrapper needs strawberry-graphql-django.
-graphql = [
-    "strawberry-graphql-django>=0.20",
-]
-# Use fastberry.rest with the SQLAlchemy ORM instead of Django (e.g. FastAPI).
-# Still needs the `rest` extra for orjson.
+# Read-only REST serialization on the SQLAlchemy ORM instead of Django (e.g.
+# FastAPI). No Django; still needs orjson for encoding.
 sqlalchemy = [
     "orjson>=3.9",
     "SQLAlchemy>=2.0",
+]
+# Static analysis: Ruff (lint + format) and mypy (type check).
+lint = [
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 dev = [
     "pytest>=8.0",
@@ -54,6 +76,8 @@ dev = [
     "djangorestframework>=3.14",
     "orjson>=3.9",
     "SQLAlchemy>=2.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [project.urls]
@@ -63,6 +87,43 @@ Issues = "https://github.com/davidsarosi92/fastberry/issues"
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+# RUF012: declarative `fields = [...]` / Meta class attributes are the schema
+# idiom (FastRest, DRF, strawberry) — not accidental mutable state.
+"tests/*" = ["B", "RUF012"]
+"example/*" = ["RUF012"]
+"example/fastapi/*" = ["B008"]  # FastAPI's Depends() default-arg pattern
+
+[tool.ruff.lint.isort]
+known-first-party = ["fastberry"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+# Third-party ORM/framework libs (Django, strawberry, SQLAlchemy, DRF) are
+# resolved lazily and not all ship complete type info; don't fail on them.
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
 
 [tool.hatch.version]
 source = "vcs"
