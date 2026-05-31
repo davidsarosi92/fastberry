@@ -22,15 +22,15 @@ SQLAlchemy backend needs a ``Session``, which the caller threads in via
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
 class ForwardFK:
     """A forward foreign key (this model holds the related pk)."""
 
-    attr: str            # relation attribute name on this model
-    fk_col: str          # column on THIS model holding the related pk
+    attr: str  # relation attribute name on this model
+    fk_col: str  # column on THIS model holding the related pk
     related_model: Any
 
 
@@ -38,9 +38,9 @@ class ForwardFK:
 class ReverseFK:
     """A reverse foreign key / one-to-many (the child holds the fk back to us)."""
 
-    accessor: str        # relation attribute name on this model (the "many" side)
+    accessor: str  # relation attribute name on this model (the "many" side)
     child_model: Any
-    child_fk_col: str    # column on the CHILD holding the fk back to this model
+    child_fk_col: str  # column on the CHILD holding the fk back to this model
 
 
 @dataclass
@@ -48,9 +48,9 @@ class ModelSpec:
     """Normalized, ORM-independent description of a model."""
 
     pk_name: str
-    scalar_fields: list[str]      # non-FK scalar columns (includes the pk)
-    fk_columns: list[str]         # forward-FK id columns
-    decimal_fields: set[str]      # columns that may yield Decimal values
+    scalar_fields: list[str]  # non-FK scalar columns (includes the pk)
+    fk_columns: list[str]  # forward-FK id columns
+    decimal_fields: set[str]  # columns that may yield Decimal values
     forward_fks: list[ForwardFK]
     reverse_fks: list[ReverseFK]
 
@@ -70,7 +70,7 @@ class Backend:
         model,
         columns,
         *,
-        where_col: Optional[str] = None,
+        where_col: str | None = None,
         where_values=None,
         source=None,
         session=None,
@@ -86,6 +86,7 @@ class Backend:
 
 # --- Django -----------------------------------------------------------------
 
+
 class DjangoBackend(Backend):
     def introspect(self, model) -> ModelSpec:
         from django.db import models
@@ -98,7 +99,9 @@ class DjangoBackend(Backend):
         for f in meta.concrete_fields:
             if isinstance(f, models.ForeignKey):
                 fk_cols.append(f.attname)  # '<name>_id'
-                forward.append(ForwardFK(attr=f.name, fk_col=f.attname, related_model=f.related_model))
+                forward.append(
+                    ForwardFK(attr=f.name, fk_col=f.attname, related_model=f.related_model)
+                )
             else:
                 scalars.append(f.name)
                 if isinstance(f, models.DecimalField):
@@ -111,14 +114,19 @@ class DjangoBackend(Backend):
             accessor = rel.get_accessor_name()
             if accessor is None:  # related_name='+' hides the relation
                 continue
-            reverse.append(ReverseFK(
-                accessor=accessor, child_model=rel.related_model,
-                child_fk_col=rel.field.attname,
-            ))
+            reverse.append(
+                ReverseFK(
+                    accessor=accessor,
+                    child_model=rel.related_model,
+                    child_fk_col=rel.field.attname,
+                )
+            )
 
         return ModelSpec(meta.pk.name, scalars, fk_cols, set(decimals), forward, reverse)
 
-    def fetch(self, model, columns, *, where_col=None, where_values=None, source=None, session=None):
+    def fetch(
+        self, model, columns, *, where_col=None, where_values=None, source=None, session=None
+    ):
         qs = source if source is not None else model._default_manager.all()
         if where_col is not None:
             qs = qs.filter(**{f"{where_col}__in": list(where_values)})
@@ -126,6 +134,7 @@ class DjangoBackend(Backend):
 
 
 # --- SQLAlchemy -------------------------------------------------------------
+
 
 class SQLAlchemyBackend(Backend):
     def introspect(self, model) -> ModelSpec:
@@ -156,10 +165,13 @@ class SQLAlchemyBackend(Backend):
             elif rel.direction is interfaces.ONETOMANY:
                 remote = pairs[0][1]
                 child_col_key = {a.columns[0]: a.key for a in sa_inspect(related).column_attrs}
-                reverse.append(ReverseFK(
-                    accessor=rel.key, child_model=related,
-                    child_fk_col=child_col_key.get(remote, remote.key),
-                ))
+                reverse.append(
+                    ReverseFK(
+                        accessor=rel.key,
+                        child_model=related,
+                        child_fk_col=child_col_key.get(remote, remote.key),
+                    )
+                )
             # MANYTOMANY skipped, like the Django backend.
 
         scalars: list[str] = []
@@ -179,7 +191,9 @@ class SQLAlchemyBackend(Backend):
 
         return ModelSpec(pk_name, scalars, fk_cols, set(decimals), forward, reverse)
 
-    def fetch(self, model, columns, *, where_col=None, where_values=None, source=None, session=None):
+    def fetch(
+        self, model, columns, *, where_col=None, where_values=None, source=None, session=None
+    ):
         from sqlalchemy import select
 
         if session is None:
@@ -206,17 +220,25 @@ _SPEC_CACHE: dict = {}
 
 
 def get_backend(model) -> Backend:
-    """Return the backend for ``model`` (Django model or SQLAlchemy mapped class)."""
-    from django.db.models import Model as DjangoModel
+    """Return the backend for ``model`` (Django model or SQLAlchemy mapped class).
 
-    if isinstance(model, type) and issubclass(model, DjangoModel):
+    Both ORMs are optional: Django comes with the ``rest`` extra, SQLAlchemy
+    with the ``sqlalchemy`` extra. Whichever is installed is probed; a model
+    from the other ORM is simply not recognized.
+    """
+    try:
+        from django.db.models import Model as DjangoModel
+    except ImportError:
+        DjangoModel = None
+
+    if DjangoModel is not None and isinstance(model, type) and issubclass(model, DjangoModel):
         return _DJANGO
 
     try:
         from sqlalchemy import inspect as sa_inspect
         from sqlalchemy.orm import Mapper
     except ImportError:
-        sa_inspect = None
+        sa_inspect = None  # type: ignore[assignment]
 
     if sa_inspect is not None:
         info = sa_inspect(model, raiseerr=False)
@@ -225,7 +247,8 @@ def get_backend(model) -> Backend:
 
     raise TypeError(
         f"fastberry.rest: don't know how to introspect {model!r}; expected a "
-        f"Django model or a SQLAlchemy mapped class (install the 'sqlalchemy' extra)."
+        f"Django model (install the 'rest' extra) or a SQLAlchemy mapped class "
+        f"(install the 'sqlalchemy' extra)."
     )
 
 

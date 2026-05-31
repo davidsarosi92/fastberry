@@ -23,8 +23,8 @@ from rest_framework import serializers
 from catalog.models import House, Product, Space, Stock
 from fastberry.rest import get_schema_for_model
 
-
 # --- DRF nested serializers (the thing we are comparing against) ------------
+
 
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
@@ -69,12 +69,12 @@ def _measure(label, fn):
 
 
 def _drf_no_prefetch():
-    HouseSerializer(House.objects.all(), many=True).data
+    _ = HouseSerializer(House.objects.all(), many=True).data
 
 
 def _drf_prefetch():
     qs = House.objects.prefetch_related("spaces__stocks__product")
-    HouseSerializer(qs, many=True).data
+    _ = HouseSerializer(qs, many=True).data
 
 
 def _fastberry():

@@ -1,7 +1,5 @@
 """Tests for FastJSONRenderer (DRF integration)."""
 
-from decimal import Decimal
-
 import orjson
 import pytest
 from django.db import connection, models
@@ -9,7 +7,7 @@ from django.db import connection, models
 from fastberry.rest import fast_rest
 
 pytest.importorskip("rest_framework")
-from fastberry.rest_renderers import FastJSONRenderer  # noqa: E402
+from fastberry.rest_renderers import FastJSONRenderer
 
 
 @fast_rest(fields=["id", "name"])

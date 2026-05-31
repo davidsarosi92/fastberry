@@ -4,8 +4,7 @@ Serves a GraphiQL playground at http://localhost:8000/ and the GraphQL endpoint
 at the same path.
 """
 
-from strawberry.asgi import GraphQL
-
 from app.schema import schema
+from strawberry.asgi import GraphQL
 
 app = GraphQL(schema)

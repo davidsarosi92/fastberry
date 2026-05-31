@@ -44,7 +44,7 @@ except ImportError as exc:  # pragma: no cover - exercised via install extras
         "Install it with: pip install 'fastberry[graphql]'"
     ) from exc
 
-__all__ = ["type", "interface", "fast_schema"]
+__all__ = ["fast_schema", "interface", "type"]
 
 
 def _wrap(sd_decorator_factory):
@@ -94,13 +94,13 @@ def fast_schema(_model=None, *, fields=None, name=None, **type_kwargs):
     Returns the model unchanged (only ``__fast_type__`` is attached), so it
     composes cleanly with other model decorators.
     """
+
     def wrap(model):
         # strawberry_django expands all model fields unless restricted via its
         # own ``fields`` argument, so the field set is controlled there (not via
         # the class annotations, which it does not treat as an allow-list).
         field_names = (
-            list(fields) if fields is not None
-            else [f.name for f in model._meta.concrete_fields]
+            list(fields) if fields is not None else [f.name for f in model._meta.concrete_fields]
         )
         type_name = name or f"{model.__name__}Type"
 

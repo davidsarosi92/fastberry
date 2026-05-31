@@ -31,8 +31,8 @@ from sqlalchemy.orm import (  # noqa: E402
 
 from fastberry.rest import FastRest, fast_rest, get_schema_for_model  # noqa: E402
 
-
 # --- models -----------------------------------------------------------------
+
 
 class Base(DeclarativeBase):
     pass
@@ -76,6 +76,7 @@ class Stock(Base):
 
 # --- schemas ----------------------------------------------------------------
 
+
 class ProductSchema(FastRest):
     class Meta:
         model = Product
@@ -83,7 +84,7 @@ class ProductSchema(FastRest):
 
 
 class StockSchema(FastRest):
-    product = ProductSchema()                  # forward FK
+    product = ProductSchema()  # forward FK
 
     class Meta:
         model = Stock
@@ -91,7 +92,7 @@ class StockSchema(FastRest):
 
 
 class SpaceSchema(FastRest):
-    stocks = StockSchema(many=True)            # reverse FK / one-to-many
+    stocks = StockSchema(many=True)  # reverse FK / one-to-many
 
     class Meta:
         model = Space
@@ -108,6 +109,7 @@ class HouseSchema(FastRest):
 
 # --- fixtures ---------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def engine():
     eng = create_engine("sqlite://")
@@ -119,13 +121,15 @@ def engine():
         h2 = House(name="Bar Two", address="Main St 2")
         s1 = Space(name="Counter", house=h1)
         s2 = Space(name="Storage", house=h1)
-        s3 = Space(name="Cellar", house=h2)  # noqa: F841 - has no stocks on purpose
+        s3 = Space(name="Cellar", house=h2)
         s.add_all([p1, p2, h1, h2, s1, s2, s3])
-        s.add_all([
-            Stock(title="A", amount=1.5, price=Decimal("9.99"), space=s1, product=p1),
-            Stock(title="B", amount=2.5, price=Decimal("19.50"), space=s1, product=p2),
-            Stock(title="C", amount=3.0, price=Decimal("5.00"), space=s2, product=p1),
-        ])
+        s.add_all(
+            [
+                Stock(title="A", amount=1.5, price=Decimal("9.99"), space=s1, product=p1),
+                Stock(title="B", amount=2.5, price=Decimal("19.50"), space=s1, product=p2),
+                Stock(title="C", amount=3.0, price=Decimal("5.00"), space=s2, product=p1),
+            ]
+        )
         s.commit()
     return eng
 
@@ -137,6 +141,7 @@ def session(engine):
 
 
 # --- tests ------------------------------------------------------------------
+
 
 def test_flat_serialize(session):
     rows = ProductSchema.serialize(select(Product).order_by(Product.id), session=session)
@@ -203,6 +208,7 @@ def test_no_n_plus_one(session):
 
 def test_serialize_json_bytes(session):
     import orjson
+
     body = ProductSchema.serialize_json(select(Product).order_by(Product.id), session=session)
     assert isinstance(body, bytes)
     assert orjson.loads(body)[0]["name"] == "Vodka"
@@ -210,7 +216,11 @@ def test_serialize_json_bytes(session):
 
 def test_serialize_obj(session):
     obj = session.get(Product, 1)
-    assert ProductSchema.serialize_obj(obj, session=session) == {"id": 1, "name": "Vodka", "ean": "111"}
+    assert ProductSchema.serialize_obj(obj, session=session) == {
+        "id": 1,
+        "name": "Vodka",
+        "ean": "111",
+    }
 
 
 def test_missing_session_raises(engine):
@@ -219,6 +229,7 @@ def test_missing_session_raises(engine):
 
 
 # --- @fast_rest on SQLAlchemy models ----------------------------------------
+
 
 def test_fast_rest_explicit_fields_hides_columns(session):
     @fast_rest(fields=["id", "title"])

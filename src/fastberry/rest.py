@@ -51,9 +51,11 @@ Supported relations: forward foreign key (single) and reverse foreign key /
 one-to-many (``many=True``). ManyToMany is not handled.
 """
 
+from collections.abc import Callable
 from decimal import Decimal
+from typing import ClassVar
 
-from fastberry.rest_backends import get_backend, introspect
+from fastberry.rest_backends import Backend, ModelSpec, get_backend, introspect
 
 try:
     import orjson
@@ -62,15 +64,15 @@ except ImportError as exc:  # pragma: no cover - exercised via install extras
         "fastberry.rest requires orjson. Install it with: pip install 'fastberry[rest]'"
     ) from exc
 
-__all__ = ["FastRest", "fast_rest", "register_schema", "get_schema_for_model"]
+__all__ = ["FastRest", "fast_rest", "get_schema_for_model", "register_schema"]
 
 
 # model class -> resolved FastRest subclass.
-_SCHEMA_REGISTRY = {}
+_SCHEMA_REGISTRY: dict[type, "type[FastRest]"] = {}
 # model class -> zero-arg builder, for schemas that must be built lazily
 # (auto-derive needs every related model loaded, which isn't guaranteed at
 # decoration time — reverse relations from models defined later would be missed).
-_SCHEMA_BUILDERS = {}
+_SCHEMA_BUILDERS: dict[type, Callable[[], "type[FastRest]"]] = {}
 
 
 def register_schema(model, schema) -> None:
@@ -108,14 +110,14 @@ def get_schema_for_model(model):
 class _NestedSpec:
     """Resolved metadata for one nested relation on a schema."""
 
-    __slots__ = ("attr", "schema", "many", "forward", "fk_attname", "child_fk_attname")
+    __slots__ = ("attr", "child_fk_attname", "fk_attname", "forward", "many", "schema")
 
     def __init__(self, attr, schema, many, forward, fk_attname, child_fk_attname):
         self.attr = attr
         self.schema = schema
         self.many = many
         self.forward = forward
-        self.fk_attname = fk_attname            # forward: fk col on this model
+        self.fk_attname = fk_attname  # forward: fk col on this model
         self.child_fk_attname = child_fk_attname  # reverse: fk col on the child model
 
 
@@ -148,16 +150,28 @@ class FastRestMeta(type):
                 continue
             if attr in spec.forward_by_attr:
                 fk = spec.forward_by_attr[attr]
-                nested.append(_NestedSpec(
-                    attr=attr, schema=value.__class__, many=False, forward=True,
-                    fk_attname=fk.fk_col, child_fk_attname=None,
-                ))
+                nested.append(
+                    _NestedSpec(
+                        attr=attr,
+                        schema=value.__class__,
+                        many=False,
+                        forward=True,
+                        fk_attname=fk.fk_col,
+                        child_fk_attname=None,
+                    )
+                )
             elif attr in spec.reverse_by_attr:
                 rev = spec.reverse_by_attr[attr]
-                nested.append(_NestedSpec(
-                    attr=attr, schema=value.__class__, many=True, forward=False,
-                    fk_attname=None, child_fk_attname=rev.child_fk_col,
-                ))
+                nested.append(
+                    _NestedSpec(
+                        attr=attr,
+                        schema=value.__class__,
+                        many=True,
+                        forward=False,
+                        fk_attname=None,
+                        child_fk_attname=rev.child_fk_col,
+                    )
+                )
             else:
                 raise TypeError(
                     f"{name}.{attr}: unsupported relation (only forward FK and "
@@ -168,6 +182,15 @@ class FastRestMeta(type):
 
 
 class FastRest(metaclass=FastRestMeta):
+    # Populated by FastRestMeta for concrete subclasses (those declaring a Meta).
+    _model: ClassVar[type]
+    _backend: ClassVar[Backend]
+    _spec: ClassVar[ModelSpec]
+    _pk_name: ClassVar[str]
+    _declared_fields: ClassVar[list[str]]
+    _decimal_fields: ClassVar[list[str]]
+    _nested: ClassVar[list[_NestedSpec]]
+
     def __init__(self, many: bool = False):
         # Instances act as nested-relation markers in a parent schema body.
         self.many = many
@@ -207,7 +230,9 @@ class FastRest(metaclass=FastRestMeta):
     # --- internals ----------------------------------------------------------
 
     @classmethod
-    def _collect(cls, *, source=None, session=None, where_col=None, where_values=None, extra_keep=()) -> list:
+    def _collect(
+        cls, *, source=None, session=None, where_col=None, where_values=None, extra_keep=()
+    ) -> list:
         pk = cls._pk_name
 
         # Columns we must fetch: declared scalars, pk (for joins), forward FK
@@ -221,9 +246,12 @@ class FastRest(metaclass=FastRestMeta):
         value_fields.update(extra_keep)
 
         rows = cls._backend.fetch(
-            cls._model, list(value_fields),
-            where_col=where_col, where_values=where_values,
-            source=source, session=session,
+            cls._model,
+            list(value_fields),
+            where_col=where_col,
+            where_values=where_values,
+            source=source,
+            session=session,
         )
 
         for row in rows:
@@ -256,7 +284,10 @@ class FastRest(metaclass=FastRestMeta):
         if ids:
             sub_pk = sub._pk_name
             sub_rows = sub._collect(
-                where_col=sub_pk, where_values=ids, session=session, extra_keep=(sub_pk,),
+                where_col=sub_pk,
+                where_values=ids,
+                session=session,
+                extra_keep=(sub_pk,),
             )
             for sr in sub_rows:
                 index[sr[sub_pk]] = sr
@@ -278,7 +309,9 @@ class FastRest(metaclass=FastRestMeta):
         groups = {}
         if parent_ids:
             child_rows = sub._collect(
-                where_col=child_fk, where_values=parent_ids, session=session,
+                where_col=child_fk,
+                where_values=parent_ids,
+                session=session,
                 extra_keep=(child_fk,),
             )
             for cr in child_rows:
@@ -293,6 +326,7 @@ class FastRest(metaclass=FastRestMeta):
 
 
 # --- @fast_rest decorator + auto-derive -------------------------------------
+
 
 def _concrete_field_names(model):
     """Local (non-relational) field names + FK ids, for default scalar output."""
@@ -375,6 +409,7 @@ def fast_rest(_cls=None, *, fields=None, nested=None, depth=None):
     Security note: auto-derive emits *every* field at each expanded level. On
     models with sensitive columns, prefer the explicit ``fields`` form.
     """
+
     def wrap(model):
         if depth is not None and (fields is not None or nested is not None):
             raise TypeError("fast_rest: use either depth= or fields=/nested=, not both")

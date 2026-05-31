@@ -14,8 +14,8 @@ from django.test.utils import CaptureQueriesContext
 
 from fastberry.rest import FastRest
 
-
 # --- models (fake app "rest_test_app") --------------------------------------
+
 
 class Product(models.Model):
     name = models.CharField(max_length=100)
@@ -54,6 +54,7 @@ class Stock(models.Model):
 
 # --- schemas ----------------------------------------------------------------
 
+
 class ProductSchema(FastRest):
     class Meta:
         model = Product
@@ -86,6 +87,7 @@ class HouseSchema(FastRest):
 
 # --- fixtures ---------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def db_data(django_db_blocker=None):
     for m in (Product, House, Space, Stock):
@@ -100,7 +102,7 @@ def db_data(django_db_blocker=None):
 
     s1 = Space.objects.create(name="Counter", house=h1)
     s2 = Space.objects.create(name="Storage", house=h1)
-    s3 = Space.objects.create(name="Cellar", house=h2)
+    _s3 = Space.objects.create(name="Cellar", house=h2)
 
     Stock.objects.create(title="A", amount=1.5, price=Decimal("9.99"), space=s1, product=p1)
     Stock.objects.create(title="B", amount=2.5, price=Decimal("19.50"), space=s1, product=p2)
@@ -112,6 +114,7 @@ def db_data(django_db_blocker=None):
 
 
 # --- tests ------------------------------------------------------------------
+
 
 def test_flat_serialize(db_data):
     rows = ProductSchema.serialize(Product.objects.order_by("id"))
@@ -171,6 +174,7 @@ def test_no_n_plus_one(db_data):
 
 def test_serialize_json_bytes(db_data):
     import orjson
+
     body = ProductSchema.serialize_json(Product.objects.order_by("id"))
     assert isinstance(body, bytes)
     assert orjson.loads(body)[0]["name"] == "Vodka"
