@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0  # hatch-vcs derives the version from the git tag
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
