@@ -195,6 +195,39 @@ The same four classes run unchanged whether `Product`/`Stock`/`Space`/`House`
 are Django models or SQLAlchemy mapped classes — only the call that drives them
 differs, as shown below.
 
+### Labels, expressions, and M2M (Django)
+
+Beyond nested sub-objects, three field markers emit common shapes **without
+materializing instances** — the label/expression is projected by the database:
+
+```python
+from decimal import Decimal
+
+from django.db.models import F, Value
+from django.db.models.functions import Concat
+
+from fastberry.rest import Expr, FastRest, LabelRef, M2MLabels
+
+
+class StockRest(FastRest):
+    category = LabelRef(label="name")                 # FK  -> {"id", "label"} | None
+    tags = M2MLabels(label="name", cap=20)            # M2M -> capped [{"id","label"}, …]
+    full = Expr(Concat("title", Value(" "), "size"))  # DB-computed column
+    total = Expr(F("amount") * F("price"), decimal=True)
+
+    class Meta:
+        model = Stock
+        fields = ["id", "title"]
+```
+
+- `LabelRef(relation=None, label="name")` — a forward FK as `{"id", "label"}`
+  (or `None`), the label projected from `related.<label>` via a join.
+- `Expr(expression, decimal=False)` — a value computed by a Django expression
+  (`.annotate()`); set `decimal=True` to stringify a `Decimal`.
+- `M2MLabels(relation=None, label="name", cap=20)` — a many-to-many as a capped
+  `[{"id","label"}, …]` list, fetched set-based over the through table (a
+  `{"id": None, "label": "+N more"}` marker caps it; `cap=None` = no cap).
+
 ### Django / DRF
 
 Serialize a queryset directly:
@@ -287,7 +320,17 @@ The advantage *grows* with payload size — ~3.4× at 300 leaves up to ~6.9× at
 
 Supported relations in this version: forward foreign key (single) and reverse
 foreign key / one-to-many (`many=True`), on both the Django and SQLAlchemy
-backends. ManyToMany is not yet handled.
+backends. ManyToMany is supported as capped `{"id","label"}` columns via
+`M2MLabels` (Django); nested M2M sub-objects (`many=True`) are not.
+
+### Pluggable list provider
+
+`fastberry.list_provider.ListProvider` is a thin, framework-agnostic adapter that
+compiles a duck-typed *field plan* (model, scalar fields, FK labels, M2M labels)
+into a `FastRest` and serializes pages from it. It is the integration point for
+admin/CRUD layers that want fast list rows without importing fastberry types — for
+example, [Theia NG](https://pypi.org/project/theia-ng/) plugs it in via a single
+`LIST_PROVIDER` setting.
 
 ---
 

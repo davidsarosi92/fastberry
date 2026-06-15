@@ -64,7 +64,15 @@ except ImportError as _exc:  # pragma: no cover - exercised via install extras
         "fastberry.rest requires orjson. Install it with: pip install 'fastberry[rest]'"
     ) from _exc
 
-__all__ = ["FastRest", "fast_rest", "get_schema_for_model", "register_schema"]
+__all__ = [
+    "Expr",
+    "FastRest",
+    "LabelRef",
+    "M2MLabels",
+    "fast_rest",
+    "get_schema_for_model",
+    "register_schema",
+]
 
 
 # model class -> resolved FastRest subclass.
@@ -105,6 +113,108 @@ def get_schema_for_model(model: Any) -> "type[FastRest] | None":
         register_schema(model, schema)
         return schema
     return None
+
+
+# --- field markers ----------------------------------------------------------
+#
+# Set as class attributes in a FastRest body, alongside (or instead of) nested
+# FastRest instances. They let a schema emit human labels and many-to-many
+# columns WITHOUT materializing model instances — the label/expression is
+# projected by the database, so the no-instance fast path is preserved.
+
+
+class LabelRef:
+    """A forward FK rendered as ``{"id": <fk_id>, "label": <related.label>}``.
+
+    ``label`` is a field path on the related model (default ``"name"``),
+    projected via a spanning ``.values()`` lookup — no extra query, no instance.
+    A null FK serializes to ``None``. ``relation`` defaults to the attribute the
+    marker is assigned to::
+
+        class StockRest(FastRest):
+            category = LabelRef(label="name")          # -> {"id":3,"label":"Beers"}
+            dealer = LabelRef("supplier", label="title")
+            class Meta:
+                model = Stock
+                fields = ["id", "title"]
+    """
+
+    def __init__(self, relation: str | None = None, *, label: str = "name") -> None:
+        self.relation = relation
+        self.label = label
+
+
+class Expr:
+    """A field whose value is computed by a DB expression (``.annotate()``).
+
+    The annotated column is read by the attribute name it is assigned to::
+
+        full_name = Expr(Concat("first", Value(" "), "last"))
+        total = Expr(F("qty") * F("price"), decimal=True)
+
+    Set ``decimal=True`` when the expression yields a ``Decimal`` so it is
+    stringified consistently with declared decimal fields. Django backend only.
+    """
+
+    def __init__(self, expression: Any, *, decimal: bool = False) -> None:
+        self.expression = expression
+        self.decimal = decimal
+
+
+class M2MLabels:
+    """A many-to-many column rendered as a capped list of ``{"id","label"}``.
+
+    Fetched set-based over the through table for the whole result page (no
+    per-row manager access, no instances). When more than ``cap`` related rows
+    exist for a row, a ``{"id": None, "label": "+N more"}`` marker is appended.
+    ``cap=None`` means no cap (every related row). ``relation`` defaults to the
+    assigned attribute name::
+
+        tags = M2MLabels(label="name", cap=20)
+
+    Django backend only.
+    """
+
+    def __init__(
+        self, relation: str | None = None, *, label: str = "name", cap: int | None = 20
+    ) -> None:
+        self.relation = relation
+        self.label = label
+        self.cap = cap
+
+
+class _LabelRefSpec:
+    """Resolved metadata for a LabelRef field."""
+
+    __slots__ = ("fk_attname", "label_col", "out_attr")
+
+    def __init__(self, out_attr: str, fk_attname: str, label_col: str) -> None:
+        self.out_attr = out_attr  # output key (and assigned attr name)
+        self.fk_attname = fk_attname  # fk id column on this model (e.g. "category_id")
+        self.label_col = label_col  # spanning projection (e.g. "category__name")
+
+
+class _ExprSpec:
+    """Resolved metadata for an Expr field."""
+
+    __slots__ = ("expression", "is_decimal", "out_attr")
+
+    def __init__(self, out_attr: str, expression: Any, is_decimal: bool) -> None:
+        self.out_attr = out_attr
+        self.expression = expression
+        self.is_decimal = is_decimal
+
+
+class _M2MLabelSpec:
+    """Resolved metadata for an M2MLabels field."""
+
+    __slots__ = ("cap", "label_path", "out_attr", "rel")
+
+    def __init__(self, out_attr: str, rel: Any, label_path: str, cap: int | None) -> None:
+        self.out_attr = out_attr
+        self.rel = rel  # rest_backends.M2MRel
+        self.label_path = label_path  # field path on the related model
+        self.cap = cap
 
 
 class _NestedSpec:
@@ -156,41 +266,74 @@ class FastRestMeta(type):
         # Decide Decimal conversion once, at class-definition time.
         cls._decimal_fields = [f for f in declared_fields if f in spec.decimal_fields]
 
-        # Resolve nested declarations (instances of FastRest set as attributes).
+        # Resolve declarations set as class attributes: nested FastRest instances
+        # (full sub-objects) and the label/expr/m2m field markers.
         nested = []
+        label_refs: list[_LabelRefSpec] = []
+        exprs: list[_ExprSpec] = []
+        m2m_labels: list[_M2MLabelSpec] = []
         for attr, value in list(namespace.items()):
-            if not isinstance(value, FastRest):
-                continue
-            if attr in spec.forward_by_attr:
-                fk = spec.forward_by_attr[attr]
-                nested.append(
-                    _NestedSpec(
-                        attr=attr,
-                        schema=value.__class__,
-                        many=False,
-                        forward=True,
+            if isinstance(value, LabelRef):
+                relation = value.relation or attr
+                fk = spec.forward_by_attr.get(relation)
+                if fk is None:
+                    raise TypeError(
+                        f"{name}.{attr}: LabelRef target {relation!r} is not a forward FK"
+                    )
+                label_refs.append(
+                    _LabelRefSpec(
+                        out_attr=attr,
                         fk_attname=fk.fk_col,
-                        child_fk_attname=None,
+                        label_col=f"{relation}__{value.label}",
                     )
                 )
-            elif attr in spec.reverse_by_attr:
-                rev = spec.reverse_by_attr[attr]
-                nested.append(
-                    _NestedSpec(
-                        attr=attr,
-                        schema=value.__class__,
-                        many=True,
-                        forward=False,
-                        fk_attname=None,
-                        child_fk_attname=rev.child_fk_col,
+            elif isinstance(value, Expr):
+                exprs.append(_ExprSpec(out_attr=attr, expression=value.expression, is_decimal=value.decimal))
+            elif isinstance(value, M2MLabels):
+                relation = value.relation or attr
+                rel = spec.m2m_by_attr.get(relation)
+                if rel is None:
+                    raise TypeError(
+                        f"{name}.{attr}: M2MLabels target {relation!r} is not a many-to-many "
+                        f"field (or the backend does not support m2m)"
                     )
+                m2m_labels.append(
+                    _M2MLabelSpec(out_attr=attr, rel=rel, label_path=value.label, cap=value.cap)
                 )
-            else:
-                raise TypeError(
-                    f"{name}.{attr}: unsupported relation (only forward FK and "
-                    f"reverse FK / one-to-many are supported)"
-                )
+            elif isinstance(value, FastRest):
+                if attr in spec.forward_by_attr:
+                    fk = spec.forward_by_attr[attr]
+                    nested.append(
+                        _NestedSpec(
+                            attr=attr,
+                            schema=value.__class__,
+                            many=False,
+                            forward=True,
+                            fk_attname=fk.fk_col,
+                            child_fk_attname=None,
+                        )
+                    )
+                elif attr in spec.reverse_by_attr:
+                    rev = spec.reverse_by_attr[attr]
+                    nested.append(
+                        _NestedSpec(
+                            attr=attr,
+                            schema=value.__class__,
+                            many=True,
+                            forward=False,
+                            fk_attname=None,
+                            child_fk_attname=rev.child_fk_col,
+                        )
+                    )
+                else:
+                    raise TypeError(
+                        f"{name}.{attr}: unsupported relation (only forward FK and "
+                        f"reverse FK / one-to-many are supported)"
+                    )
         cls._nested = nested
+        cls._label_refs = label_refs
+        cls._exprs = exprs
+        cls._m2m_labels = m2m_labels
         return cls
 
 
@@ -203,6 +346,9 @@ class FastRest(metaclass=FastRestMeta):
     _declared_fields: ClassVar[list[str]]
     _decimal_fields: ClassVar[list[str]]
     _nested: ClassVar[list[_NestedSpec]]
+    _label_refs: ClassVar[list[_LabelRefSpec]]
+    _exprs: ClassVar[list[_ExprSpec]]
+    _m2m_labels: ClassVar[list[_M2MLabelSpec]]
 
     def __init__(self, many: bool = False) -> None:
         # Instances act as nested-relation markers in a parent schema body.
@@ -262,7 +408,20 @@ class FastRest(metaclass=FastRestMeta):
         for spec in cls._nested:
             if spec.forward and spec.fk_attname is not None:
                 value_fields.add(spec.fk_attname)
+        # LabelRef: project the fk id (for {"id"}) + the spanning label column.
+        for lr in cls._label_refs:
+            value_fields.add(lr.fk_attname)
+            value_fields.add(lr.label_col)
+        # Expr: list the annotation alias so .values() actually selects it.
+        for e in cls._exprs:
+            value_fields.add(e.out_attr)
+        # M2MLabels need the parent pk to group the through-table rows on.
+        if cls._m2m_labels:
+            value_fields.add(pk)
         value_fields.update(extra_keep)
+
+        # Expr: computed by the DB via .annotate(), read back by its output name.
+        annotations = {e.out_attr: e.expression for e in cls._exprs} or None
 
         rows = cls._backend.fetch(
             cls._model,
@@ -271,13 +430,23 @@ class FastRest(metaclass=FastRestMeta):
             where_values=where_values,
             source=source,
             session=session,
+            annotations=annotations,
         )
 
+        decimal_names = list(cls._decimal_fields) + [e.out_attr for e in cls._exprs if e.is_decimal]
         for row in rows:
-            for f in cls._decimal_fields:
+            for f in decimal_names:
                 v = row.get(f)
                 if isinstance(v, Decimal):
                     row[f] = str(v)
+
+        # LabelRef -> {"id", "label"} (or None for a null FK), from projected cols.
+        for lr in cls._label_refs:
+            for row in rows:
+                fk_id = row.get(lr.fk_attname)
+                row[lr.out_attr] = (
+                    None if fk_id is None else {"id": fk_id, "label": row.get(lr.label_col)}
+                )
 
         for spec in cls._nested:
             if spec.forward:
@@ -285,13 +454,39 @@ class FastRest(metaclass=FastRestMeta):
             else:
                 cls._attach_reverse(rows, spec, session)
 
+        for m in cls._m2m_labels:
+            cls._attach_m2m_labels(rows, m, session)
+
         # Strip helper columns we added but the caller did not declare/request.
         declared = set(cls._declared_fields) | {s.attr for s in cls._nested} | set(extra_keep)
+        declared |= {lr.out_attr for lr in cls._label_refs}
+        declared |= {e.out_attr for e in cls._exprs}
+        declared |= {m.out_attr for m in cls._m2m_labels}
         for row in rows:
             for key in [k for k in row if k not in declared]:
                 del row[key]
 
         return rows
+
+    @classmethod
+    def _attach_m2m_labels(cls, rows: list[dict[str, Any]], m: _M2MLabelSpec, session: Any) -> None:
+        pk = cls._pk_name
+        parent_ids = [r[pk] for r in rows]
+        triples = cls._backend.fetch_m2m(m.rel, parent_ids, m.label_path, session=session)
+
+        groups: dict[Any, list[dict[str, Any]]] = {}
+        for source_id, target_id, label in triples:
+            groups.setdefault(source_id, []).append({"id": target_id, "label": label})
+
+        cap = m.cap
+        for r in rows:
+            items = groups.get(r[pk], [])
+            if cap is not None and len(items) > cap:
+                capped = items[:cap]
+                capped.append({"id": None, "label": f"+{len(items) - cap} more"})
+                r[m.out_attr] = capped
+            else:
+                r[m.out_attr] = items
 
     @classmethod
     def _attach_forward(cls, rows: list[dict[str, Any]], spec: _NestedSpec, session: Any) -> None:
