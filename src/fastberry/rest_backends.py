@@ -295,8 +295,7 @@ class SQLAlchemyBackend(Backend):
 
         if annotations:
             raise NotImplementedError(
-                "fastberry.rest: Expr/annotation fields are only supported on the "
-                "Django backend."
+                "fastberry.rest: Expr/annotation fields are only supported on the Django backend."
             )
         if session is None:
             raise TypeError(
