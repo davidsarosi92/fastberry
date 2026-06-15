@@ -288,7 +288,9 @@ class FastRestMeta(type):
                     )
                 )
             elif isinstance(value, Expr):
-                exprs.append(_ExprSpec(out_attr=attr, expression=value.expression, is_decimal=value.decimal))
+                exprs.append(
+                    _ExprSpec(out_attr=attr, expression=value.expression, is_decimal=value.decimal)
+                )
             elif isinstance(value, M2MLabels):
                 relation = value.relation or attr
                 rel = spec.m2m_by_attr.get(relation)

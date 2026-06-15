@@ -109,7 +109,7 @@ class Backend:
 
     def fetch_m2m(
         self,
-        rel: "M2MRel",
+        rel: M2MRel,
         source_ids: Sequence[Any],
         label_path: str | None,
         *,
@@ -201,7 +201,7 @@ class DjangoBackend(Backend):
 
     def fetch_m2m(
         self,
-        rel: "M2MRel",
+        rel: M2MRel,
         source_ids: Sequence[Any],
         label_path: str | None,
         *,

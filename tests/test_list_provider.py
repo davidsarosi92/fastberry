@@ -66,7 +66,10 @@ def data(django_db_blocker=None):
 
 
 def test_provider_serializes_plan(data):
-    rows = {r["title"]: r for r in ListProvider().serialize_page(_plan(), LPStock.objects.order_by("pk"))}
+    rows = {
+        r["title"]: r
+        for r in ListProvider().serialize_page(_plan(), LPStock.objects.order_by("pk"))
+    }
     assert rows["A"]["category"] == {"id": 1, "label": "Beers"}
     assert rows["B"]["category"] is None
     assert rows["A"]["price"] == "9.99"  # decimal stringified
