@@ -17,7 +17,7 @@ import nox
 
 nox.options.sessions = ["lint", "typecheck", "tests", "isolation"]
 
-PYTHONS = ["3.10", "3.11", "3.12", "3.13"]
+PYTHONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
 
 @nox.session(python=PYTHONS)

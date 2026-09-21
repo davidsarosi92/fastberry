@@ -27,7 +27,7 @@ pip install 'fastberry[rest]'        # REST on Django/DRF (+ Django, orjson)
 pip install 'fastberry[sqlalchemy]'  # REST on FastAPI/SQLAlchemy — no Django (+ SQLAlchemy, orjson)
 ```
 
-Requires Python 3.10+. Django (4.2+) is only installed by the `graphql` and
+Requires Python 3.10-3.14. Django (4.2+) is only installed by the `graphql` and
 `rest` extras; the `sqlalchemy` extra is Django-free.
 
 ---
