@@ -111,6 +111,10 @@ exclude_also = [
 target-version = "py310"
 line-length = 100
 src = ["src", "tests"]
+# Ruff 0.16+ formats fenced code blocks inside Markdown. The README examples use
+# aligned trailing comments as a teaching aid; reformatting collapses them and
+# hurts readability, so docs are left to the author.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
