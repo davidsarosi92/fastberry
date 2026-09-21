@@ -592,7 +592,7 @@ def _build_auto_schema(model: Any, depth: int, _seen: frozenset[Any]) -> "type[F
     Meta = type("Meta", (), {"model": model, "fields": fields})
     namespace["Meta"] = Meta
     name = f"_Auto{model.__name__}Rest"
-    return cast("type[FastRest]", FastRestMeta(name, (FastRest,), namespace))
+    return FastRestMeta(name, (FastRest,), namespace)
 
 
 def fast_rest(
